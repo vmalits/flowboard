@@ -1,25 +1,48 @@
 package main
 
 import (
+	"context"
 	"log"
-	"net/http"
+	"os"
+	"os/signal"
+	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/vmalits/taskboard/backend/internal/config"
+	"github.com/vmalits/taskboard/backend/internal/http/handler"
+	"github.com/vmalits/taskboard/backend/internal/http/router"
+	"github.com/vmalits/taskboard/backend/internal/server"
 )
 
 func main() {
 
-	r := chi.NewRouter()
+	cfg := config.Load()
 
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("OK"))
-	})
+	healthHandler := handler.NewHealthHandler()
 
-	log.Println("Starting server on :8000")
+	r := router.New(healthHandler)
 
-	err := http.ListenAndServe(":8000", r)
+	srv := server.New(":"+cfg.AppPort, r)
 
-	if err != nil {
-		log.Fatal(err)
+	go func() {
+		log.Printf("Server is running on port %s", cfg.AppPort)
+		if err := srv.Run(); err != nil {
+			log.Fatalf("Server failed to start: %v", err)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt)
+
+	<-stop
+
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
 	}
+
+	log.Println("Server exiting")
 }
